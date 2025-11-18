@@ -1,0 +1,4 @@
+/* Local Tailwind CSS - no CDN dependency */
+@tailwind base;
+@tailwind components;
+@tailwind utilities;

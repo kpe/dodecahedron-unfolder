@@ -1,0 +1,5 @@
+{
+  "name": "Dodecahedron Unfolder",
+  "description": "An interactive tool to visualize the different ways a dodecahedron can be unfolded into a 2D net. Click on the highlighted edges of the pentagons to unfold the next face of the dodecahedron.",
+  "requestFramePermissions": []
+}
