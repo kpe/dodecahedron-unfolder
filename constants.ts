@@ -21,4 +21,4 @@ export const PENTAGON_RADIUS = 100;
 export const TOTAL_FACES = 12;
 
 // Used to orient the pentagons so one side is flat at the 'top'.
-export const PENTAGON_ROTATION_OFFSET_DEG = -18;
+export const PENTAGON_ROTATION_OFFSET_DEG = 72;
