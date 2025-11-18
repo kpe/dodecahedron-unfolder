@@ -23,6 +23,7 @@ const App = () => {
     const newMap = new Map<number, PlacedPentagon>();
     newMap.set(0, initialPentagon);
     setPlacedPentagons(newMap);
+    setMaxViewBoxSize(500); // Reset to initial size when creating initial pentagon
   }, []);
 
   useEffect(() => {
@@ -45,7 +46,7 @@ const App = () => {
     });
 
     // Calculate bounds with consistent padding
-    const padding = PENTAGON_RADIUS * 1.0; // Increased padding for better visibility
+    const padding = PENTAGON_RADIUS * 1.5; // Increased padding to ensure full visibility
     const contentWidth = maxX - minX;
     const contentHeight = maxY - minY;
 
@@ -54,13 +55,11 @@ const App = () => {
     const newWidth = maxDimension + padding * 2;
     const newHeight = maxDimension + padding * 2;
 
-    // Update the maximum viewBox size if the new one is larger
-    if (newWidth > maxViewBoxSize) {
-      setMaxViewBoxSize(newWidth);
-    }
+    // Always use the new calculated size to ensure all pentagons are visible
+    const finalSize = newWidth;
 
-    // Always use the maximum viewBox size to prevent zooming in/out
-    const finalSize = maxViewBoxSize;
+    // Update the maximum viewBox size tracking
+    setMaxViewBoxSize(finalSize);
 
     // Center the content in the square viewBox
     const centerX = (minX + maxX) / 2;
@@ -222,7 +221,7 @@ const App = () => {
       <main className="flex-grow relative touch-manipulation">
         <svg
           className="w-full h-full"
-          preserveAspectRatio="xMidYMid meet"
+          preserveAspectRatio="xMidYMid slice"
           viewBox={viewBox}
           style={{ touchAction: 'manipulation' }}
         >
