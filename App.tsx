@@ -36,6 +36,7 @@ export default function App() {
     let bestSnapAngle = angle;
     let isSnapped = false;
     let minDiff = 0.015; // ~0.8 degrees threshold
+    let targetCandidatePt: Point | null = null;
 
     // Use the base start point
     const start = baseCalculation.startPt;
@@ -54,16 +55,18 @@ export default function App() {
             minDiff = diff;
             bestSnapAngle = targetAngle;
             isSnapped = true;
+            targetCandidatePt = c.pt;
         }
     }
 
-    if (isSnapped) {
+    if (isSnapped && targetCandidatePt) {
         // Recalculate exact strip for the snapped angle to ensure visual perfection
         const snappedCalc = calculateUnrolling(bestSnapAngle, 12);
-        return { ...snappedCalc, angle: bestSnapAngle, isSnapped: true };
+        const dist = vecLen(vecSub(targetCandidatePt, start));
+        return { ...snappedCalc, angle: bestSnapAngle, isSnapped: true, snapDistance: dist };
     }
     
-    return { ...baseCalculation, angle, isSnapped: false };
+    return { ...baseCalculation, angle, isSnapped: false, snapDistance: 0 };
   }, [angle, baseCalculation, snapped]); // Add snapped to deps to force refresh if needed
 
   // Update local state if we snapped effectively (for UI feedback)
@@ -87,10 +90,17 @@ export default function App() {
   };
 
   // Fixed Large Viewport for Stability
-  // Zoomed in for 12 pentagons.
-  // X: -500 (Left padding) to 3000 (Room for ~12 pentagons)
-  // Y: -1000 to 2000 (Shifted to place start vertex in upper half)
   const viewBox = "-500 -1000 3500 3000";
+
+  // Metrics Calculation for Display
+  // We use the first polygon (Face 0) to determine unit sizes
+  const poly0 = finalState.polygons[0];
+  // Radius is distance from center to any vertex
+  const radiusPixels = vecLen(vecSub(poly0.vertices[0].pt, poly0.center));
+  // Side length is distance between vertex 0 and 1
+  const sidePixels = vecLen(vecSub(poly0.vertices[0].pt, poly0.vertices[1].pt));
+
+  const formatSig = (n: number) => n.toPrecision(6);
 
   return (
     <div className="w-full h-screen bg-slate-950 flex flex-col text-slate-200 overflow-hidden font-sans">
@@ -113,10 +123,27 @@ export default function App() {
              </div>
           </div>
           
+          {/* Geodesic Info */}
+          {finalState.isSnapped && (
+              <div className="mt-3 border-t border-slate-700/50 pt-2">
+                <div className="text-[10px] text-slate-500 uppercase tracking-wider mb-1 font-semibold">Geodesic Length</div>
+                <div className="grid grid-cols-2 gap-x-6 gap-y-1 text-sm font-mono">
+                   <div className="flex flex-col">
+                     <span className="text-xs text-slate-400">Units of R</span>
+                     <span className="text-cyan-300 font-bold">{formatSig(finalState.snapDistance / radiusPixels)}</span>
+                   </div>
+                   <div className="flex flex-col">
+                     <span className="text-xs text-slate-400">Units of Side</span>
+                     <span className="text-cyan-300 font-bold">{formatSig(finalState.snapDistance / sidePixels)}</span>
+                   </div>
+                </div>
+              </div>
+          )}
+
           {/* Legend */}
-          <div className="mt-3 flex gap-3 text-[10px] uppercase tracking-wider text-slate-500">
-            <div className="flex items-center gap-1"><div className="w-4 h-4 rounded-full flex items-center justify-center text-[9px] font-bold text-black" style={{background: VERTEX_PALETTE[0]}}>0</div>O (Bottom)</div>
-            <div className="flex items-center gap-1"><div className="w-4 h-4 rounded-full flex items-center justify-center text-[9px] font-bold text-black" style={{background: VERTEX_PALETTE[1]}}>1</div>A (Start)</div>
+          <div className="mt-4 flex gap-3 text-[10px] uppercase tracking-wider text-slate-500">
+            <div className="flex items-center gap-1"><div className="w-4 h-4 rounded-full flex items-center justify-center text-[9px] font-bold text-black" style={{background: VERTEX_PALETTE[0]}}>0</div>O</div>
+            <div className="flex items-center gap-1"><div className="w-4 h-4 rounded-full flex items-center justify-center text-[9px] font-bold text-black" style={{background: VERTEX_PALETTE[1]}}>1</div>A</div>
             <div className="flex items-center gap-1"><div className="w-4 h-4 rounded-full flex items-center justify-center text-[9px] font-bold text-black" style={{background: VERTEX_PALETTE[2]}}>2</div></div>
             <div className="flex items-center gap-1"><div className="w-4 h-4 rounded-full flex items-center justify-center text-[9px] font-bold text-black" style={{background: VERTEX_PALETTE[3]}}>3</div></div>
             <div className="flex items-center gap-1"><div className="w-4 h-4 rounded-full flex items-center justify-center text-[9px] font-bold text-black" style={{background: VERTEX_PALETTE[4]}}>4</div></div>
