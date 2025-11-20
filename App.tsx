@@ -1,131 +1,234 @@
-import React, { useState, useEffect, useMemo, useCallback } from 'react';
-import { PlacedPentagon, Point } from './types';
-import { DODECAHEDRON_ADJACENCY, PENTAGON_RADIUS, TOTAL_FACES } from './constants';
-import { calculatePentagonVertices, calculateChildPentagon } from './services/geometry';
-import PentagonDisplay from './components/PentagonDisplay';
 
-const App = () => {
-  const [placedPentagons, setPlacedPentagons] = useState<Map<number, PlacedPentagon>>(new Map());
-  const [viewBox, setViewBox] = useState<string>('-250 -250 500 500');
+import React, { useState, useMemo, useRef, useEffect } from 'react';
+import { calculateUnrolling, vecSub, vecLen } from './utils/geometry';
+import { START_VERTEX_ID, O_VERTEX_ID } from './utils/dodecahedron';
+import { Point } from './types';
 
-  const createInitialPentagon = useCallback(() => {
-    const initialCenter: Point = { x: 0, y: 0 };
-    const initialRotation = 0;
-    const initialPentagon: PlacedPentagon = {
-      id: 0,
-      center: initialCenter,
-      rotation: initialRotation,
-      vertices: calculatePentagonVertices(initialCenter, PENTAGON_RADIUS, initialRotation),
-    };
-    const newMap = new Map<number, PlacedPentagon>();
-    newMap.set(0, initialPentagon);
-    setPlacedPentagons(newMap);
-  }, []);
+// Color palette for 12 faces
+const COLORS = [
+  '#ef4444', '#f97316', '#f59e0b', '#84cc16', '#10b981', '#06b6d4',
+  '#3b82f6', '#6366f1', '#8b5cf6', '#d946ef', '#f43f5e', '#64748b'
+];
 
+// Distinct colors for the first 5 vertices (Face 0)
+// 0: O, 1: A, 2, 3, 4
+const VERTEX_PALETTE = [
+  '#facc15', // 0: O (Yellow)
+  '#22d3ee', // 1: A (Cyan) - Start
+  '#4ade80', // 2: Green
+  '#c084fc', // 3: Purple
+  '#fb7185', // 4: Red
+];
+
+export default function App() {
+  const [angle, setAngle] = useState<number>(0.1); // Start slightly angled right
+  const [snapped, setSnapped] = useState<boolean>(false);
+  const svgRef = useRef<SVGSVGElement>(null);
+
+  // 1. Calculate Unrolling based on current angle (First Pass)
+  const baseCalculation = useMemo(() => {
+    return calculateUnrolling(angle, 12); // Reduced to 12 steps
+  }, [angle]);
+
+  // 2. Check Snapping & Recalculate if needed
+  const finalState = useMemo(() => {
+    // Check candidates from base calculation
+    let bestSnapAngle = angle;
+    let isSnapped = false;
+    let minDiff = 0.015; // ~0.8 degrees threshold
+
+    // Use the base start point
+    const start = baseCalculation.startPt;
+
+    for (const c of baseCalculation.candidates) {
+        if (vecLen(vecSub(c.pt, start)) < 10) continue; // Ignore A itself
+        
+        const dx = c.pt.x - start.x;
+        const dy = c.pt.y - start.y;
+        const targetAngle = Math.atan2(dy, dx);
+        
+        let diff = Math.abs(targetAngle - angle);
+        if (diff > Math.PI) diff = 2 * Math.PI - diff;
+        
+        if (diff < minDiff) {
+            minDiff = diff;
+            bestSnapAngle = targetAngle;
+            isSnapped = true;
+        }
+    }
+
+    if (isSnapped) {
+        // Recalculate exact strip for the snapped angle to ensure visual perfection
+        const snappedCalc = calculateUnrolling(bestSnapAngle, 12);
+        return { ...snappedCalc, angle: bestSnapAngle, isSnapped: true };
+    }
+    
+    return { ...baseCalculation, angle, isSnapped: false };
+  }, [angle, baseCalculation, snapped]); // Add snapped to deps to force refresh if needed
+
+  // Update local state if we snapped effectively (for UI feedback)
   useEffect(() => {
-    createInitialPentagon();
-  }, [createInitialPentagon]);
+    setSnapped(finalState.isSnapped);
+  }, [finalState.isSnapped]);
 
-  useEffect(() => {
-    if (placedPentagons.size === 0) return;
-
-    let minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity;
-    placedPentagons.forEach(p => {
-      p.vertices.forEach(v => {
-        minX = Math.min(minX, v.x);
-        maxX = Math.max(maxX, v.x);
-        minY = Math.min(minY, v.y);
-        maxY = Math.max(maxY, v.y);
-      });
-    });
-
-    const padding = PENTAGON_RADIUS * 0.8;
-    const width = maxX - minX + padding * 2;
-    const height = maxY - minY + padding * 2;
-    const newX = minX - padding;
-    const newY = minY - padding;
-
-    setViewBox(`${newX} ${newY} ${width} ${height}`);
-  }, [placedPentagons]);
-
-  const handleEdgeClick = useCallback((parentId: number, edgeIndex: number) => {
-    if (placedPentagons.size >= TOTAL_FACES) return;
-
-    const parentPentagon = placedPentagons.get(parentId);
-    if (!parentPentagon) return;
-
-    const childId = DODECAHEDRON_ADJACENCY[parentId][edgeIndex];
-    if (placedPentagons.has(childId)) return;
-
-    const newPentagon = calculateChildPentagon(parentPentagon, edgeIndex, childId);
-
-    setPlacedPentagons(prevMap => {
-      const newMap = new Map(prevMap);
-      newMap.set(childId, newPentagon);
-      return newMap;
-    });
-  }, [placedPentagons]);
-  
-  const handleReset = () => {
-    createInitialPentagon();
+  const handleMouseMove = (e: React.MouseEvent) => {
+    if (!svgRef.current) return;
+    
+    // Transform mouse coordinate to SVG space
+    const CTM = svgRef.current.getScreenCTM();
+    if (!CTM) return;
+    const mouseX = (e.clientX - CTM.e) / CTM.a;
+    const mouseY = (e.clientY - CTM.f) / CTM.d;
+    
+    const start = finalState.startPt;
+    const newAngle = Math.atan2(mouseY - start.y, mouseX - start.x);
+    
+    setAngle(newAngle);
   };
 
-  const openEdgesMap = useMemo(() => {
-    const map = new Map<number, boolean[]>();
-    placedPentagons.forEach(p => {
-      const edges = DODECAHEDRON_ADJACENCY[p.id].map(neighborId => !placedPentagons.has(neighborId));
-      map.set(p.id, edges);
-    });
-    return map;
-  }, [placedPentagons]);
-
-  const allPentagons = Array.from(placedPentagons.values());
-  const facesPlaced = placedPentagons.size;
-  const isComplete = facesPlaced === TOTAL_FACES;
+  // Fixed Large Viewport for Stability
+  // Zoomed in for 12 pentagons.
+  // X: -500 (Left padding) to 3000 (Room for ~12 pentagons)
+  // Y: -1000 to 2000 (Shifted to place start vertex in upper half)
+  const viewBox = "-500 -1000 3500 3000";
 
   return (
-    <div className="flex flex-col h-screen w-screen bg-gray-900 text-white overflow-hidden">
-      <header className="flex-shrink-0 bg-gray-800/50 backdrop-blur-sm p-4 flex justify-between items-center z-10 border-b border-gray-700">
-        <div className="text-left">
-            <h1 className="text-xl md:text-2xl font-bold text-cyan-400">Dodecahedron Unfolder</h1>
-            <p className="text-sm text-gray-400">Click highlighted edges to unfold the 12 faces.</p>
-        </div>
-        <div className="flex items-center space-x-4">
-            <div className={`text-lg font-mono px-4 py-2 rounded-md ${isComplete ? 'bg-green-500/80 text-white' : 'bg-gray-700 text-cyan-300'}`}>
-                {facesPlaced} / {TOTAL_FACES} Faces
-            </div>
-            <button
-                onClick={handleReset}
-                className="px-4 py-2 bg-indigo-600 hover:bg-indigo-500 rounded-md font-semibold transition-colors"
-            >
-                Reset
-            </button>
+    <div className="w-full h-screen bg-slate-950 flex flex-col text-slate-200 overflow-hidden font-sans">
+      {/* Header */}
+      <header className="absolute top-0 left-0 w-full p-4 z-10 flex justify-between items-start pointer-events-none">
+        <div className="bg-slate-900/80 backdrop-blur p-4 rounded-xl border border-slate-800 pointer-events-auto shadow-lg">
+          <h1 className="text-xl font-bold text-transparent bg-clip-text bg-gradient-to-r from-cyan-400 to-blue-500">
+            Dodecahedron Unfolder
+          </h1>
+          <p className="text-xs text-slate-400 mt-2 max-w-md leading-relaxed">
+             Ray starts from Vertex <span style={{color: VERTEX_PALETTE[1], fontWeight: 'bold'}}>1 (A)</span>.
+             Target is another <span style={{color: VERTEX_PALETTE[1], fontWeight: 'bold'}}>1</span>.
+          </p>
+          <div className="mt-3 flex flex-wrap gap-2 text-xs font-mono">
+             <div className={`px-2 py-1 rounded border ${finalState.isSnapped ? 'border-cyan-500 bg-cyan-900/30 text-cyan-300' : 'border-slate-700 bg-slate-800 text-slate-500'}`}>
+               {finalState.isSnapped ? 'SNAPPED TO VERTEX 1' : 'FREE ROAM'}
+             </div>
+             <div className="px-2 py-1 rounded border border-slate-700 bg-slate-800">
+               {finalState.polygons.length} Faces
+             </div>
+          </div>
+          
+          {/* Legend */}
+          <div className="mt-3 flex gap-3 text-[10px] uppercase tracking-wider text-slate-500">
+            <div className="flex items-center gap-1"><div className="w-4 h-4 rounded-full flex items-center justify-center text-[9px] font-bold text-black" style={{background: VERTEX_PALETTE[0]}}>0</div>O (Bottom)</div>
+            <div className="flex items-center gap-1"><div className="w-4 h-4 rounded-full flex items-center justify-center text-[9px] font-bold text-black" style={{background: VERTEX_PALETTE[1]}}>1</div>A (Start)</div>
+            <div className="flex items-center gap-1"><div className="w-4 h-4 rounded-full flex items-center justify-center text-[9px] font-bold text-black" style={{background: VERTEX_PALETTE[2]}}>2</div></div>
+            <div className="flex items-center gap-1"><div className="w-4 h-4 rounded-full flex items-center justify-center text-[9px] font-bold text-black" style={{background: VERTEX_PALETTE[3]}}>3</div></div>
+            <div className="flex items-center gap-1"><div className="w-4 h-4 rounded-full flex items-center justify-center text-[9px] font-bold text-black" style={{background: VERTEX_PALETTE[4]}}>4</div></div>
+          </div>
         </div>
       </header>
-      <main className="flex-grow relative">
-        <svg
-          preserveAspectRatio="xMidYMid meet"
-          viewBox={viewBox}
+
+      {/* Canvas */}
+      <main className="flex-1 relative cursor-crosshair">
+        <svg 
+           ref={svgRef}
+           viewBox={viewBox} 
+           className="w-full h-full touch-none select-none"
+           onMouseMove={handleMouseMove}
         >
-          <g>
-            {allPentagons.map((p: PlacedPentagon) => (
-              <PentagonDisplay
-                key={p.id}
-                pentagon={p}
-                onEdgeClick={handleEdgeClick}
-                openEdges={openEdgesMap.get(p.id) || [false,false,false,false,false]}
-              />
-            ))}
-          </g>
+           {/* Background Grid */}
+           <defs>
+             <pattern id="grid" width="500" height="500" patternUnits="userSpaceOnUse">
+               <path d="M 500 0 L 0 0 0 500" fill="none" stroke="rgba(255,255,255,0.03)" strokeWidth="2"/>
+             </pattern>
+           </defs>
+           <rect x="-2000" y="-2000" width="8000" height="6000" fill="url(#grid)" />
+
+           {/* Polygons */}
+           <g>
+             {finalState.polygons.map((poly, i) => (
+               <g key={i}>
+                 <polygon
+                   points={poly.vertices.map(v => `${v.pt.x.toFixed(1)},${v.pt.y.toFixed(1)}`).join(' ')}
+                   fill={COLORS[poly.faceId]}
+                   fillOpacity={0.2 + (i === 0 ? 0.4 : 0)} // Highlight start face
+                   stroke={COLORS[poly.faceId]}
+                   strokeWidth={finalState.isSnapped ? 4 : 2}
+                   strokeLinejoin="round"
+                 />
+                 {/* Face Number */}
+                 <text
+                   x={poly.center.x}
+                   y={poly.center.y}
+                   textAnchor="middle"
+                   dominantBaseline="middle"
+                   fontSize="40"
+                   fill="rgba(255,255,255,0.3)"
+                   className="pointer-events-none"
+                 >
+                   {poly.faceId}
+                 </text>
+                 
+                 {/* Vertices */}
+                 {poly.vertices.map((v, idx) => {
+                    const isStartVertex = v.id === START_VERTEX_ID;
+                    const isInitialVert = v.id <= 4; // Only label 0, 1, 2, 3, 4
+                    const isSnappedTarget = isStartVertex && i > 0 && finalState.isSnapped;
+
+                    // If not an initial vertex (and not the special snapped target which is implicitly ID 1), show subtle dot
+                    if (!isInitialVert) {
+                        return (
+                            <circle 
+                                key={idx} 
+                                cx={v.pt.x} 
+                                cy={v.pt.y} 
+                                r={3} 
+                                fill="#475569" // Slate-600
+                                className="pointer-events-none opacity-50"
+                            />
+                        );
+                    }
+
+                    // Main rendering for Initial Vertices (0-4)
+                    const baseColor = VERTEX_PALETTE[v.id];
+
+                    return (
+                       <g key={idx}>
+                         <circle 
+                           cx={v.pt.x} cy={v.pt.y} 
+                           r={isSnappedTarget ? 16 : 10} 
+                           fill={baseColor} 
+                           stroke={isSnappedTarget ? "#fff" : "rgba(0,0,0,0.3)"} 
+                           strokeWidth={isSnappedTarget ? 3 : 1} 
+                         />
+                         <text 
+                           x={v.pt.x} 
+                           y={v.pt.y} 
+                           dy=".35em" // Vertical center
+                           textAnchor="middle" 
+                           fill="#1e293b" // Dark text for contrast
+                           fontSize="12" 
+                           fontWeight="bold"
+                           className="pointer-events-none"
+                         >
+                           {v.id}
+                         </text>
+                       </g>
+                    );
+                 })}
+               </g>
+             ))}
+           </g>
+
+           {/* Ray */}
+           <line 
+             x1={finalState.startPt.x}
+             y1={finalState.startPt.y}
+             x2={finalState.startPt.x + Math.cos(finalState.angle) * 4000}
+             y2={finalState.startPt.y + Math.sin(finalState.angle) * 4000}
+             stroke={finalState.isSnapped ? VERTEX_PALETTE[1] : "#fbbf24"}
+             strokeWidth={finalState.isSnapped ? 6 : 2}
+             strokeDasharray={finalState.isSnapped ? "" : "10, 10"}
+             opacity={0.8}
+           />
         </svg>
-         {isComplete && (
-            <div className="absolute bottom-8 left-1/2 -translate-x-1/2 bg-green-500/90 text-white px-6 py-3 rounded-lg shadow-2xl font-bold text-xl">
-                Congratulations! You've unfolded a complete dodecahedron net.
-            </div>
-        )}
       </main>
     </div>
   );
-};
-
-export default App;
+}
