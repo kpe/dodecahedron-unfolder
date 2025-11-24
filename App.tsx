@@ -74,19 +74,35 @@ export default function App() {
     setSnapped(finalState.isSnapped);
   }, [finalState.isSnapped]);
 
-  const handleMouseMove = (e: React.MouseEvent) => {
+  const updateAngle = (clientX: number, clientY: number) => {
     if (!svgRef.current) return;
     
     // Transform mouse coordinate to SVG space
     const CTM = svgRef.current.getScreenCTM();
     if (!CTM) return;
-    const mouseX = (e.clientX - CTM.e) / CTM.a;
-    const mouseY = (e.clientY - CTM.f) / CTM.d;
+    const mouseX = (clientX - CTM.e) / CTM.a;
+    const mouseY = (clientY - CTM.f) / CTM.d;
     
     const start = finalState.startPt;
     const newAngle = Math.atan2(mouseY - start.y, mouseX - start.x);
     
     setAngle(newAngle);
+  };
+
+  const handleMouseMove = (e: React.MouseEvent) => {
+    updateAngle(e.clientX, e.clientY);
+  };
+
+  const handleTouch = (e: React.TouchEvent) => {
+    // Prevent scrolling or other default behaviors
+    // Note: 'touch-none' CSS class handles most of this, but preventDefault ensures it
+    if (e.cancelable) {
+      e.preventDefault();
+    }
+
+    if (e.touches.length > 0) {
+      updateAngle(e.touches[0].clientX, e.touches[0].clientY);
+    }
   };
 
   // Fixed Large Viewport for Stability
@@ -158,6 +174,8 @@ export default function App() {
            viewBox={viewBox} 
            className="w-full h-full touch-none select-none"
            onMouseMove={handleMouseMove}
+           onTouchStart={handleTouch}
+           onTouchMove={handleTouch}
         >
            {/* Background Grid */}
            <defs>
